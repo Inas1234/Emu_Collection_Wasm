@@ -1,6 +1,8 @@
 use crate::memory::MemoryBus;
 use crate::ppu::GPU;
 use crate::console_log;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 const ZERO_FLAG_BYTE_POSITION: u8 = 7;
 const SUBTRACT_FLAG_BYTE_POSITION: u8 = 6;
@@ -247,15 +249,14 @@ enum ArithmeticTarget {
 pub struct CPU {
     registers: Registers,
     pc: u16,
-    bus: MemoryBus,
+    bus: Rc<RefCell<MemoryBus>>,
     sp: u16,
     ime: bool,
-    gpu: GPU
+    gpu: Rc<RefCell<GPU>>
 }
 
 impl CPU {
-    pub fn new(bus: MemoryBus) -> Self {
-        let gpu = GPU::new(bus.clone());
+    pub fn new(bus: Rc<RefCell<MemoryBus>>, gpu: Rc<RefCell<GPU>>) -> Self {
         Self {
             registers: Registers {
                 a: 0,
@@ -281,8 +282,8 @@ impl CPU {
     }
 
     fn handle_interrupts(&mut self) {
-        let interrupt_enable = self.bus.read_byte(0xFFFF);
-        let interrupt_flag = self.bus.read_byte(0xFF0F);
+        let interrupt_enable = self.bus.borrow_mut().read_byte(0xFFFF);
+        let interrupt_flag = self.bus.borrow_mut().read_byte(0xFF0F);
 
         let pending_interrupts = interrupt_enable & interrupt_flag;
         if pending_interrupts == 0 {
@@ -306,8 +307,8 @@ impl CPU {
     }
 
     fn service_interrupt(&mut self, interrupt_bit: u8, vector: u16) {
-        let interrupt_flag = self.bus.read_byte(0xFF0F);
-        self.bus.write_byte(0xFF0F, interrupt_flag & !(1 << interrupt_bit));
+        let interrupt_flag = self.bus.borrow_mut().read_byte(0xFF0F);
+        self.bus.borrow_mut().write_byte(0xFF0F, interrupt_flag & !(1 << interrupt_bit));
 
         self.push_stack(self.pc);
 
@@ -318,15 +319,15 @@ impl CPU {
 
     fn push_stack(&mut self, value: u16) {
         self.sp = self.sp.wrapping_sub(1);
-        self.bus.write_byte(self.sp, (value >> 8) as u8);
+        self.bus.borrow_mut().write_byte(self.sp, (value >> 8) as u8);
         self.sp = self.sp.wrapping_sub(1);
-        self.bus.write_byte(self.sp, (value & 0xFF) as u8);
+        self.bus.borrow_mut().write_byte(self.sp, (value & 0xFF) as u8);
     }
 
     fn pop_stack(&mut self) -> u16 {
-        let low = self.bus.read_byte(self.sp) as u16;
+        let low = self.bus.borrow_mut().read_byte(self.sp) as u16;
         self.sp = self.sp.wrapping_add(1);
-        let high = self.bus.read_byte(self.sp) as u16;
+        let high = self.bus.borrow_mut().read_byte(self.sp) as u16;
         self.sp = self.sp.wrapping_add(1);
         (high << 8) | low
     }
@@ -334,30 +335,30 @@ impl CPU {
     pub fn step(&mut self) {
         // Check if interrupts are enabled, and handle them if so
         if self.ime {
-            console_log!("Handling interrupts...");
+
             self.handle_interrupts();
         }
     
         // Read the opcode at the current program counter (PC)
-        let opcode = self.bus.read_byte(self.pc);
-        console_log!("Executing opcode: {:#04X} at PC: {:#04X}", opcode, self.pc);
+        let opcode = self.bus.borrow_mut().read_byte(self.pc);
+
     
         // Increment the program counter to point to the next instruction
         self.pc = self.pc.wrapping_add(1);
     
         // Decode the opcode into an instruction
         let instruction = self.decode_opcode(opcode);
-        console_log!("Decoded instruction: {:?}", instruction);
+
     
         // Execute the decoded instruction and get the number of cycles taken
         let cycles = self.execute(instruction);
-        console_log!("Executed instruction: {:?} took {} cycles", instruction, cycles);
+
     
         // Step the GPU with the number of cycles used by the instruction
-        console_log!("Stepping GPU with {} cycles", cycles);
-        self.gpu.step(cycles);
+
+        self.gpu.borrow_mut().step(cycles);
     
-        console_log!("Step completed successfully\n");
+
     }
     
     fn decode_opcode(&mut self, opcode: u8) -> Instruction {
@@ -471,22 +472,22 @@ impl CPU {
             0x1F => Instruction::RRA,
 
             0x3E => {
-                let value = self.bus.read_byte(self.pc);
+                let value = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded LD A, {:#04X}", value);
+
                 Instruction::LDImmediate8(ArithmeticTarget::A, value)
             }
             0xE0 => {
-                let offset = self.bus.read_byte(self.pc);
+                let offset = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded LD (0xFF00 + {:#04X}), A", offset);
+
                 Instruction::LDIOOffsetFromA(offset)
             }
 
             0x0E => {
-                let value = self.bus.read_byte(self.pc);
+                let value = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded LD C, {:#04X}", value);
+
                 Instruction::LDImmediate8(ArithmeticTarget::C, value)
             }
     
@@ -497,9 +498,9 @@ impl CPU {
             }
             
             0x06 => {
-                let value = self.bus.read_byte(self.pc);
+                let value = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded LD B, {:#04X}", value);
+
                 Instruction::LDImmediate8(ArithmeticTarget::B, value)
             }
     
@@ -514,113 +515,113 @@ impl CPU {
             }
     
             0xEA => {
-                let low = self.bus.read_byte(self.pc);
-                let high = self.bus.read_byte(self.pc + 1);
+                let low = self.bus.borrow_mut().read_byte(self.pc);
+                let high = self.bus.borrow_mut().read_byte(self.pc + 1);
                 let address = ((high as u16) << 8) | (low as u16);
                 self.pc = self.pc.wrapping_add(2);
-                console_log!("Decoded LD (nn), A with address {:#04X}", address);
+
                 Instruction::LDAddressFromA(address)
             }
             0x7C => Instruction::LD(ArithmeticTarget::A, ArithmeticTarget::H),
 
             0xF3 => {
-                console_log!("Decoded DI (Disable Interrupts)");
+
                 Instruction::DI
             }
     
             0xC3 => {
-                let low = self.bus.read_byte(self.pc);
-                let high = self.bus.read_byte(self.pc + 1);
+                let low = self.bus.borrow_mut().read_byte(self.pc);
+                let high = self.bus.borrow_mut().read_byte(self.pc + 1);
                 let address = ((high as u16) << 8) | (low as u16);
-                console_log!("Decoded JP to address: {:#04X}", address);
+
                 self.pc = self.pc.wrapping_add(2); 
                 Instruction::JP(address)
             }
 
             0x21 => {
-                let low = self.bus.read_byte(self.pc);
-                let high = self.bus.read_byte(self.pc + 1);
+                let low = self.bus.borrow_mut().read_byte(self.pc);
+                let high = self.bus.borrow_mut().read_byte(self.pc + 1);
                 let value = ((high as u16) << 8) | (low as u16);
-                console_log!("Decoded LD HL, {:#04X}", value);
+
                 self.pc = self.pc.wrapping_add(2);
                 Instruction::LDImmediate16(RegisterPair::HL, value)
             }
     
             
             0xF0 => {
-                let offset = self.bus.read_byte(self.pc);
+                let offset = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded LD A, (0xFF00 + {:#04X})", offset);
+
                 Instruction::LDIOOffsetToA(offset)
             }
 
             0xE6 => {
-                let value = self.bus.read_byte(self.pc);
+                let value = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded AND {:#04X}", value);
+
                 Instruction::ANDImmediate(value)
             }
 
             0xFE => {
-                let value = self.bus.read_byte(self.pc);
+                let value = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded CP {:#04X}", value);
+
                 Instruction::CPImmediate(value)
             }
     
     
             0x06 => {
-                let value = self.bus.read_byte(self.pc);
+                let value = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
                 Instruction::LDImmediate8(ArithmeticTarget::B, value)
             }
             0x0E => {
-                let value = self.bus.read_byte(self.pc);
+                let value = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
                 Instruction::LDImmediate8(ArithmeticTarget::C, value)
             }
             0x21 => {
-                let low = self.bus.read_byte(self.pc);
-                let high = self.bus.read_byte(self.pc + 1);
+                let low = self.bus.borrow_mut().read_byte(self.pc);
+                let high = self.bus.borrow_mut().read_byte(self.pc + 1);
                 let value = ((high as u16) << 8) | low as u16;
                 self.pc = self.pc.wrapping_add(2);
                 Instruction::LDImmediate16(RegisterPair::HL, value)
             }
 
             0xC3 => {
-                let low = self.bus.read_byte(self.pc);
-                let high = self.bus.read_byte(self.pc + 1);
+                let low = self.bus.borrow_mut().read_byte(self.pc);
+                let high = self.bus.borrow_mut().read_byte(self.pc + 1);
                 let address = ((high as u16) << 8) | low as u16;
                 self.pc = self.pc.wrapping_add(2);
                 Instruction::JP(address)
             }
             0xC9 => Instruction::RET,
             0xCD => {
-                let low = self.bus.read_byte(self.pc);
-                let high = self.bus.read_byte(self.pc + 1);
+                let low = self.bus.borrow_mut().read_byte(self.pc);
+                let high = self.bus.borrow_mut().read_byte(self.pc + 1);
                 let address = ((high as u16) << 8) | low as u16;
                 self.pc = self.pc.wrapping_add(2);
                 Instruction::CALL(address)
             }
             0xE0 => {
-                let offset = self.bus.read_byte(self.pc);
+                let offset = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
                 Instruction::LDIOOffsetFromA(offset)
             }
             0xE6 => {
-                let value = self.bus.read_byte(self.pc);
+                let value = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
                 Instruction::ANDImmediate(value)
             }
             0xF0 => {
-                let offset = self.bus.read_byte(self.pc);
+                let offset = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
                 Instruction::LDIOOffsetToA(offset)
             }
             0xF3 => Instruction::DI,
             0xFB => Instruction::EI,
             0xFE => {
-                let value = self.bus.read_byte(self.pc);
+                let value = self.bus.borrow_mut().read_byte(self.pc);
                 self.pc = self.pc.wrapping_add(1);
                 Instruction::CPImmediate(value)
             }
@@ -630,19 +631,19 @@ impl CPU {
             0x76 => Instruction::HALT,
             0x31 => {
                 // Read the next two bytes to form a 16-bit value
-                let low = self.bus.read_byte(self.pc);
-                let high = self.bus.read_byte(self.pc + 1);
+                let low = self.bus.borrow_mut().read_byte(self.pc);
+                let high = self.bus.borrow_mut().read_byte(self.pc + 1);
                 let value = ((high as u16) << 8) | (low as u16);
                 self.pc = self.pc.wrapping_add(2); // Advance the program counter by 2 bytes
-                console_log!("Decoded LD SP, {:#04X}", value);
+
                 Instruction::LDSPImmediate16(value)
             }
             0x7D => Instruction::LD(ArithmeticTarget::A, ArithmeticTarget::L),
             0x18 => {
                 // Read the signed 8-bit offset
-                let offset = self.bus.read_byte(self.pc) as i8;
+                let offset = self.bus.borrow_mut().read_byte(self.pc) as i8;
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded JR {:+}", offset);
+
                 Instruction::JR(offset)
             }
             0xE5 => Instruction::PUSH(RegisterPair::HL),
@@ -656,16 +657,16 @@ impl CPU {
             0x78 => Instruction::LD(ArithmeticTarget::A, ArithmeticTarget::B),
             0x28 => {
                 // Read the signed 8-bit offset
-                let offset = self.bus.read_byte(self.pc) as i8;
+                let offset = self.bus.borrow_mut().read_byte(self.pc) as i8;
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded JR Z, {:+}", offset);
+
                 Instruction::JRZ(offset)
             }
             0x20 => {
                 // Read the signed 8-bit offset
-                let offset = self.bus.read_byte(self.pc) as i8;
+                let offset = self.bus.borrow_mut().read_byte(self.pc) as i8;
                 self.pc = self.pc.wrapping_add(1);
-                console_log!("Decoded JR NZ, {:+}", offset);
+
                 Instruction::JRNZ(offset)
             }
     
@@ -678,7 +679,7 @@ impl CPU {
     }
 
     fn fetch_byte(&mut self) -> u8 {
-        let value = self.bus.read_byte(self.pc);
+        let value = self.bus.borrow_mut().read_byte(self.pc);
         self.pc = self.pc.wrapping_add(1);
         value
     }
@@ -691,7 +692,7 @@ impl CPU {
 
 
     fn decode_extended_opcode(&mut self) -> Instruction {
-        let opcode = self.bus.read_byte(self.pc);
+        let opcode = self.bus.borrow_mut().read_byte(self.pc);
         self.pc = self.pc.wrapping_add(1);
         match opcode {
             0x11 => Instruction::RL(ArithmeticTarget::C),
@@ -743,26 +744,26 @@ impl CPU {
                 8
             }
             Instruction::LDAFromAddress(address) => {
-                let value = self.bus.read_byte(address);
+                let value = self.bus.borrow_mut().read_byte(address);
                 self.registers.a = value;
                 16
             }
             Instruction::LDAddressFromA(address) => {
-                self.bus.write_byte(address, self.registers.a);
+                self.bus.borrow_mut().write_byte(address, self.registers.a);
                 16
             }
 
             Instruction::LDIOOffsetFromA(offset) => {
                 let address = 0xFF00 + (offset as u16);
-                console_log!("Executing LD (0xFF00 + {:#04X}), A", offset);
-                self.bus.write_byte(address, self.registers.a);
+
+                self.bus.borrow_mut().write_byte(address, self.registers.a);
                 12 // LD (0xFF00 + n), A takes 12 cycles
             }    
             Instruction::LDIOOffsetToA(offset) => {
                 let address = 0xFF00 + (offset as u16);
-                console_log!("Executing LD A, (0xFF00 + {:#04X})", offset);
-                self.registers.a = self.bus.read_byte(address);
-                console_log!("Loaded value {:#04X} into A from address {:#04X}", self.registers.a, address);
+
+                self.registers.a = self.bus.borrow_mut().read_byte(address);
+
                 12 // LD A, (0xFF00 + n) takes 12 cycles
             }    
     
@@ -773,23 +774,23 @@ impl CPU {
                 }
             }
             Instruction::LD(ArithmeticTarget::A, ArithmeticTarget::L) => {
-                console_log!("Executing LD A, L");
+
                 self.registers.a = self.registers.l;
                 4 // LD A, L takes 4 cycles
             }
             Instruction::LD(ArithmeticTarget::A, ArithmeticTarget::B) => {
-                console_log!("Executing LD A, B");
+
     
                 // Copy the value from register B to register A
                 self.registers.a = self.registers.b;
-                console_log!("Loaded value {:#04X} from B into A", self.registers.a);
+
     
                 4 // LD A, B takes 4 cycles
             }
     
     
             Instruction::ANDImmediate(value) => {
-                console_log!("Executing AND {:#04X} with A = {:#04X}", value, self.registers.a);
+
                 
                 // Perform the AND operation
                 self.registers.a &= value;
@@ -812,7 +813,7 @@ impl CPU {
             }
 
             Instruction::CPImmediate(value) => {
-                console_log!("Executing CP {:#04X} with A = {:#04X}", value, self.registers.a);
+
     
                 // Perform the comparison (A - value) and set flags
                 let result = self.registers.a.wrapping_sub(value);
@@ -837,13 +838,13 @@ impl CPU {
 
 
             Instruction::LDImmediate16(RegisterPair::HL, value) => {
-                console_log!("Executing LD HL, {:#04X}", value);
+
                 self.registers.set_hl(value);
                 12 // LD HL, nn takes 12 cycles
             }
 
             Instruction::LDImmediate8(ArithmeticTarget::C, value) => {
-                console_log!("Executing LD C, {:#04X}", value);
+
                 self.registers.c = value;
                 8 // LD C, n takes 8 cycles
             }
@@ -867,12 +868,12 @@ impl CPU {
             }
             Instruction::LDIOOffsetFromA(offset) => {
                 let address = 0xFF00 + offset as u16;
-                self.bus.write_byte(address, self.registers.a);
+                self.bus.borrow_mut().write_byte(address, self.registers.a);
                 12
             }
             Instruction::LDIOOffsetToA(offset) => {
                 let address = 0xFF00 + offset as u16;
-                self.registers.a = self.bus.read_byte(address);
+                self.registers.a = self.bus.borrow_mut().read_byte(address);
                 12
             }
             Instruction::CPImmediate(value) => {
@@ -902,29 +903,29 @@ impl CPU {
             Instruction::LDHLADecrement => {
                 // Store the value in register A to the address pointed by HL
                 let address = self.registers.get_hl();
-                console_log!("Executing LD (HL-), A. Address: {:#04X}, Value: {:#04X}", address, self.registers.a);
+
     
-                self.bus.write_byte(address, self.registers.a);
+                self.bus.borrow_mut().write_byte(address, self.registers.a);
     
                 // Decrement HL after the write
                 let new_hl = address.wrapping_sub(1);
                 self.registers.set_hl(new_hl);
-                console_log!("Decremented HL to: {:#04X}", new_hl);
+
     
                 8 // LD (HL-), A takes 8 cycles
             }
             Instruction::LDSPImmediate16(value) => {
-                console_log!("Executing LD SP, {:#04X}", value);
+
                 self.sp = value;
                 12 // LD SP, nn takes 12 cycles
             }
             Instruction::LD(ArithmeticTarget::A, ArithmeticTarget::H) => {
-                console_log!("Executing LD A, H");
+
                 self.registers.a = self.registers.h;
                 4 // LD A, H takes 4 cycles
             }
             Instruction::JR(offset) => {
-                console_log!("Executing JR {:+}", offset);
+
                 
                 // Calculate the new program counter value with the offset
                 self.pc = self.pc.wrapping_add(offset as u16);
@@ -933,7 +934,7 @@ impl CPU {
             }
     
             Instruction::PUSH(RegisterPair::HL) => {
-                console_log!("Executing PUSH HL");
+
     
                 // Get the high and low bytes of HL
                 let hl = self.registers.get_hl();
@@ -942,36 +943,36 @@ impl CPU {
     
                 // Push the high byte onto the stack
                 self.sp = self.sp.wrapping_sub(1);
-                self.bus.write_byte(self.sp, high_byte);
-                console_log!("Pushed high byte {:#04X} to stack at address {:#04X}", high_byte, self.sp);
+                self.bus.borrow_mut().write_byte(self.sp, high_byte);
+
     
                 // Push the low byte onto the stack
                 self.sp = self.sp.wrapping_sub(1);
-                self.bus.write_byte(self.sp, low_byte);
-                console_log!("Pushed low byte {:#04X} to stack at address {:#04X}", low_byte, self.sp);
+                self.bus.borrow_mut().write_byte(self.sp, low_byte);
+
     
                 16 // PUSH nn takes 16 cycles
             }
             Instruction::POP(RegisterPair::HL) => {
-                console_log!("Executing POP HL");
+
     
                 // Read the low byte from the stack into register L
-                let low_byte = self.bus.read_byte(self.sp);
+                let low_byte = self.bus.borrow_mut().read_byte(self.sp);
                 self.sp = self.sp.wrapping_add(1);
                 self.registers.l = low_byte;
-                console_log!("Popped low byte {:#04X} from stack to register L", low_byte);
+
     
                 // Read the high byte from the stack into register H
-                let high_byte = self.bus.read_byte(self.sp);
+                let high_byte = self.bus.borrow_mut().read_byte(self.sp);
                 self.sp = self.sp.wrapping_add(1);
                 self.registers.h = high_byte;
-                console_log!("Popped high byte {:#04X} from stack to register H", high_byte);
+
     
                 12 // POP nn takes 12 cycles
             }
     
             Instruction::PUSHAF => {
-                console_log!("Executing PUSH AF");
+
     
                 // Get the high and low bytes of the AF register pair
                 let high_byte = self.registers.a;
@@ -979,65 +980,65 @@ impl CPU {
     
                 // Push the high byte (A) onto the stack
                 self.sp = self.sp.wrapping_sub(1);
-                self.bus.write_byte(self.sp, high_byte);
-                console_log!("Pushed high byte {:#04X} to stack at address {:#04X}", high_byte, self.sp);
+                self.bus.borrow_mut().write_byte(self.sp, high_byte);
+
     
                 // Push the low byte (F) onto the stack
                 self.sp = self.sp.wrapping_sub(1);
-                self.bus.write_byte(self.sp, low_byte);
-                console_log!("Pushed low byte {:#04X} to stack at address {:#04X}", low_byte, self.sp);
+                self.bus.borrow_mut().write_byte(self.sp, low_byte);
+
     
                 16 // PUSH AF takes 16 cycles
             }
             Instruction::INCHL => {
-                console_log!("Executing INC HL");
+
                 
                 // Increment the HL register pair
                 let hl = self.registers.get_hl();
                 let new_hl = hl.wrapping_add(1);
                 self.registers.set_hl(new_hl);
                 
-                console_log!("Incremented HL to {:#06X}", new_hl);
+
     
                 8 // INC HL takes 8 cycles
             }
             Instruction::LDAFromHLIncrement => {
-                console_log!("Executing LD A, (HL+)");
+
     
                 // Get the address from the HL register
                 let address = self.registers.get_hl();
     
                 // Load the value from memory into register A
-                let value = self.bus.read_byte(address);
+                let value = self.bus.borrow_mut().read_byte(address);
                 self.registers.a = value;
-                console_log!("Loaded value {:#04X} from address {:#06X} into A", value, address);
+
     
                 // Increment the HL register by 1
                 let new_hl = address.wrapping_add(1);
                 self.registers.set_hl(new_hl);
-                console_log!("Incremented HL to {:#06X}", new_hl);
+
     
                 8 // LD A, (HL+) takes 8 cycles
             }
             Instruction::POPAF => {
-                console_log!("Executing POP AF");
+
     
                 // Read the low byte from the stack into the F register
-                let low_byte = self.bus.read_byte(self.sp);
+                let low_byte = self.bus.borrow_mut().read_byte(self.sp);
                 self.sp = self.sp.wrapping_add(1);
                 self.registers.f = FlagRegister::from(low_byte);
-                console_log!("Popped low byte (flags) {:#04X} from stack to F", low_byte);
+
     
                 // Read the high byte from the stack into the A register
-                let high_byte = self.bus.read_byte(self.sp);
+                let high_byte = self.bus.borrow_mut().read_byte(self.sp);
                 self.sp = self.sp.wrapping_add(1);
                 self.registers.a = high_byte;
-                console_log!("Popped high byte {:#04X} from stack to A", high_byte);
+
     
                 12 // POP AF takes 12 cycles
             }
             Instruction::PUSH(RegisterPair::BC) => {
-                console_log!("Executing PUSH BC");
+
     
                 // Get the high and low bytes of the BC register pair
                 let high_byte = self.registers.b;
@@ -1045,49 +1046,49 @@ impl CPU {
     
                 // Push the high byte onto the stack
                 self.sp = self.sp.wrapping_sub(1);
-                self.bus.write_byte(self.sp, high_byte);
-                console_log!("Pushed high byte {:#04X} to stack at address {:#06X}", high_byte, self.sp);
+                self.bus.borrow_mut().write_byte(self.sp, high_byte);
+
     
                 // Push the low byte onto the stack
                 self.sp = self.sp.wrapping_sub(1);
-                self.bus.write_byte(self.sp, low_byte);
-                console_log!("Pushed low byte {:#04X} to stack at address {:#06X}", low_byte, self.sp);
+                self.bus.borrow_mut().write_byte(self.sp, low_byte);
+
     
                 16 // PUSH nn takes 16 cycles
             }
             Instruction::INCBC => {
-                console_log!("Executing INC BC");
+
     
                 // Increment the BC register pair
                 let bc = self.registers.get_bc();
                 let new_bc = bc.wrapping_add(1);
                 self.registers.set_bc(new_bc);
     
-                console_log!("Incremented BC to {:#06X}", new_bc);
+
     
                 8 // INC BC takes 8 cycles
             }
             Instruction::JRZ(offset) => {
-                console_log!("Executing JR Z, {:+}", offset);
+
     
                 if self.registers.f.zero {
-                    console_log!("Zero flag is set. Jumping to offset {:+}", offset);
+
                     self.pc = self.pc.wrapping_add(offset as u16);
                     12 // If the jump is taken, it takes 12 cycles
                 } else {
-                    console_log!("Zero flag not set. Skipping jump");
+
                     8 // If the jump is not taken, it takes 8 cycles
                 }
             }
             Instruction::JRNZ(offset) => {
-                console_log!("Executing JR NZ, {:+}", offset);
+
     
                 if !self.registers.f.zero {
-                    console_log!("Zero flag not set. Jumping to offset {:+}", offset);
+
                     self.pc = self.pc.wrapping_add(offset as u16);
                     12 // If the jump is taken, it takes 12 cycles
                 } else {
-                    console_log!("Zero flag is set. Skipping jump");
+
                     8 // If the jump is not taken, it takes 8 cycles
                 }
             }

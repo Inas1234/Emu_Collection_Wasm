@@ -1,3 +1,9 @@
+use crate::console_log;
+use crate::ppu::GPU;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+
 #[derive(Clone)]
 pub struct MemoryBus {
     rom: Vec<u8>,                 // Cartridge ROM
@@ -9,11 +15,12 @@ pub struct MemoryBus {
     hram: [u8; 0x7F],             // High RAM (HRAM)
     pub interrupt_enable: u8,         // Interrupt Enable Register
     pub interrupt_flag: u8,           // Interrupt Flag Register (0xFF0F)
+    pub gpu: Option<Rc<RefCell<GPU>>>,                  // Add a reference to your GPU
 }
 
 impl MemoryBus {
-    pub fn new(rom: Vec<u8>) -> Self {
-        Self {
+    pub fn new(rom: Vec<u8>) -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self  {
             rom,
             vram: [0; 0x2000],
             eram: [0; 0x2000],
@@ -23,7 +30,11 @@ impl MemoryBus {
             hram: [0; 0x7F],
             interrupt_enable: 0,
             interrupt_flag: 0,
-        }
+            gpu: None
+        }))
+    }
+    pub fn set_gpu(&mut self, gpu: Rc<RefCell<GPU>>) {
+        self.gpu = Some(gpu);
     }
 
     pub fn read_byte(&self, address: u16) -> u8 {
@@ -59,7 +70,10 @@ impl MemoryBus {
             0xFF00..=0xFF7F => {
                 if address == 0xFF0F {
                     self.interrupt_flag
-                } else {
+                } else if address == 0xFF40 {
+                    self.gpu.as_ref().unwrap().borrow_mut().lcd_control
+                }
+                else {
                     self.io_registers[(address - 0xFF00) as usize]
                 }
             }
@@ -100,8 +114,11 @@ impl MemoryBus {
             0xFF00..=0xFF7F => {
                 if address == 0xFF0F {
                     self.interrupt_flag = value;
+                } else if address == 0xFF40 {
+                    // Update the LCD Control register
+                    console_log!("Writing to LCD Control (0xFF40): {:#04X}", value);
+                    self.gpu.as_mut().unwrap().borrow_mut().lcd_control = value;
                 }
-
                 else {
                     self.io_registers[(address - 0xFF00) as usize] = value;
                 }
