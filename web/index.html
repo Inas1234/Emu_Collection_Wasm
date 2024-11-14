@@ -2,41 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Emulator Suite</title>
-    <script type="module" src="index.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Game Emulator</title>
     <style>
       canvas {
-        border: 1px solid black;
+        border: 1px solid #000;
         image-rendering: pixelated;
-      }
-      body {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        margin-top: 20px;
-      }
-      #controls {
-        margin-top: 10px;
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 10px;
       }
     </style>
   </head>
   <body>
-    <h1>Emulator Suite</h1>
-    <select id="emulator-select">
-      <option value="chip8">Chip-8</option>
-      <!-- Add options for other emulators here -->
-      <!-- <option value="nes">NES</option> -->
-    </select>
+    <h1>Wasm Game Emulator</h1>
+    <input type="file" id="romInput" accept=".gb" />
+    <br /><br />
+    <canvas id="canvas" width="160" height="144"></canvas>
+    <br /><br />
+    <button id="stepButton">Step Emulator</button>
 
-    <div id="controls">
-      <input type="file" id="file-input" />
-      <button id="start-button" disabled>Start Emulation</button>
-    </div>
-
-    <canvas id="screen" width="640" height="320"></canvas>
+    <script type="module" src="gameboy.js"></script>
   </body>
 </html>
