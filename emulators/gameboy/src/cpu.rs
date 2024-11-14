@@ -165,7 +165,25 @@ enum Instruction {
     SRA(ArithmeticTarget),        // Shift right arithmetic
     SLA(ArithmeticTarget),        // Shift left arithmetic
     SWAP(ArithmeticTarget),       // Swap nibbles
+
+        // New instructions for immediate values and memory access
+    LDImmediate8(ArithmeticTarget, u8),
+    LDImmediate16(RegisterPair, u16),
+    ADDImmediate(u8),
+    LDAFromAddress(u16),
+    LDAddressFromA(u16),
+    NOP,
+    HALT,
+    
 }
+
+#[derive(Clone, Copy)]
+enum RegisterPair {
+    BC,
+    DE,
+    HL,
+}
+
 
 #[derive(Clone, Copy)]
 enum ArithmeticTarget {
@@ -195,12 +213,16 @@ impl CPU {
         let opcode = self.bus.read_byte(self.pc);
         self.pc = self.pc.wrapping_add(1);
 
+        let instruction = self.decode_opcode(opcode);
+
+        self.execute(instruction);
+
     }
 
     fn decode_opcode(&mut self, opcode: u8) -> Instruction {
         match opcode {
             // NOP (No Operation)
-            //0x00 => Instruction::NOP,
+            0x00 => Instruction::NOP,
 
             // ADD A, r
             0x80 => Instruction::ADD(ArithmeticTarget::B),
@@ -307,8 +329,34 @@ impl CPU {
             0x17 => Instruction::RLA,
             0x1F => Instruction::RRA,
 
+            0x3E => {
+                let value = self.fetch_byte();
+                Instruction::LDImmediate8(ArithmeticTarget::A, value)
+            }
+    
+            0x01 => {
+                let value = self.fetch_word();
+                Instruction::LDImmediate16(RegisterPair::BC, value)
+            }
+    
+            0xC6 => {
+                let value = self.fetch_byte();
+                Instruction::ADDImmediate(value)
+            }
+    
+            0xFA => {
+                let address = self.fetch_word();
+                Instruction::LDAFromAddress(address)
+            }
+    
+            0xEA => {
+                let address = self.fetch_word();
+                Instruction::LDAddressFromA(address)
+            }
+    
+
             // Halt (stop CPU until an interrupt occurs)
-            //0x76 => Instruction::HALT,
+            0x76 => Instruction::HALT,
 
             // Extended opcodes (0xCB prefix)
             0xCB => self.decode_extended_opcode(),
@@ -317,7 +365,19 @@ impl CPU {
         }
     }
 
-    /// Decodes extended opcodes (0xCB-prefixed).
+    fn fetch_byte(&mut self) -> u8 {
+        let value = self.bus.read_byte(self.pc);
+        self.pc = self.pc.wrapping_add(1);
+        value
+    }
+
+    fn fetch_word(&mut self) -> u16 {
+        let low = self.fetch_byte() as u16;
+        let high = self.fetch_byte() as u16;
+        (high << 8) | low
+    }
+
+
     fn decode_extended_opcode(&mut self) -> Instruction {
         let opcode = self.bus.read_byte(self.pc);
         self.pc = self.pc.wrapping_add(1);
@@ -362,6 +422,36 @@ impl CPU {
             Instruction::SRA(target) => self.sra(target),
             Instruction::SLA(target) => self.sla(target),
             Instruction::SWAP(target) => self.swap(target),
+            Instruction::LDImmediate8(target, value) => self.set_register_value(target, value),
+            Instruction::LDImmediate16(pair, value) => self.set_register_pair(pair, value),
+            Instruction::ADDImmediate(value) => {
+                let (result, carry) = self.registers.a.overflowing_add(value);
+                self.update_flags(result, false, carry, (self.registers.a & 0xF) + (value & 0xF) > 0xF);
+                self.registers.a = result;
+            }
+            Instruction::LDAFromAddress(address) => {
+                let value = self.bus.read_byte(address);
+                self.registers.a = value;
+            }
+            Instruction::LDAddressFromA(address) => {
+                self.bus.memory[address as usize] = self.registers.a;
+            }
+            Instruction::HALT => {
+                println!("CPU HALT");
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            Instruction::NOP => {}    
+            _ => {}
+        }
+    }
+
+    fn set_register_pair(&mut self, pair: RegisterPair, value: u16) {
+        match pair {
+            RegisterPair::BC => self.registers.set_bc(value),
+            RegisterPair::DE => self.registers.set_de(value),
+            RegisterPair::HL => self.registers.set_hl(value),
         }
     }
 
