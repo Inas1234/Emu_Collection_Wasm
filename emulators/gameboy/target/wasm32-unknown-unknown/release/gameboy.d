@@ -1,0 +1,1 @@
+/Users/inas/Desktop/Programming/Rust/Emu_Collection/emulators/gameboy/target/wasm32-unknown-unknown/release/gameboy.wasm: /Users/inas/Desktop/Programming/Rust/Emu_Collection/emulators/gameboy/src/cpu.rs /Users/inas/Desktop/Programming/Rust/Emu_Collection/emulators/gameboy/src/lib.rs

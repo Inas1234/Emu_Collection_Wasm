@@ -1,4 +1,4 @@
-EMULATORS := chip8 
+EMULATORS := chip8 gameboy 
 WEB_DIR := ../../web
 DOCS_DIR := ./docs
 
