@@ -46,8 +46,7 @@ To run the emulators locally:
 
    Open your web browser and navigate to `http://localhost:8000` to start using the emulators.
 
-6. **Github pages link**:
-   `https://inas1234.github.io/Emu_Collection_Wasm/`
+6. [**Github pages**](https://inas1234.github.io/Emu_Collection_Wasm/)
 ---
 
 *Note: This project is under active development. Features and documentation are subject to change.* 
