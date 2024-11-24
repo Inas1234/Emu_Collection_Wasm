@@ -38,7 +38,7 @@ To run the emulators locally:
    You can use a simple HTTP server to serve the `web` directory. For example, with Python:
 
    ```bash
-   cd web
+   make serve
    python3 -m http.server
    ```
 
@@ -46,7 +46,8 @@ To run the emulators locally:
 
    Open your web browser and navigate to `http://localhost:8000` to start using the emulators.
 
-
+6. **Github pages link**:
+   `https://inas1234.github.io/Emu_Collection_Wasm/`
 ---
 
 *Note: This project is under active development. Features and documentation are subject to change.* 
